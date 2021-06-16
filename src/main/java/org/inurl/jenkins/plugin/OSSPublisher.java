@@ -93,15 +93,29 @@ public class OSSPublisher extends Publisher implements SimpleBuildStep {
         EnvVars envVars = run.getEnvironment(listener);
         OSSClient client = new OSSClient(endpoint, accessKeyId, accessKeySecret.getPlainText());
 
-        String local = localPath.substring(1);
-        
-        String[] remotes = remotePath.split(",");
-        for (String remote : remotes) {
-            remote = remote.substring(1);
+        // 支持localPath和remotePath配置多个
+        // 以半角逗号分割,
+        // localPath=/abc/1.txt,/mm/t
+        // remotePath=/jeepay/mgr,/jeepay/mch
+        // 以上配置,是将/abc/1.txt传到/jeepay/mgr下，将/mm/t下的所有文件传到/jeepay/mch下
+
+        String[] localPaths = localPath.split(",");
+        String[] remotePaths = remotePath.split(",");
+
+        if(localPaths.length != remotePaths.length) {
+            logger.println("localPath="+localPath);
+            logger.println("remotePath="+remotePath);
+            logger.println("localPath 和 remotePath 配置不正确");
+            return;
+        }
+
+        for(int i=0; i<localPaths.length; i++) {
+            String local = localPaths[i].substring(1);
+            String remote = remotePaths[i].substring(1);
             String expandLocal = envVars.expand(local);
             String expandRemote = envVars.expand(remote);
-            logger.println("expandLocalPath =>" + expandLocal);
-            logger.println("expandRemotePath =>" + expandRemote);
+            logger.println("expandLocalPath["+i+"] =>" + expandLocal);
+            logger.println("expandRemotePath["+i+"] =>" + expandRemote);
             FilePath p = new FilePath(workspace, expandLocal);
             if (p.isDirectory()) {
                 logger.println("upload dir => " + p);
@@ -112,8 +126,9 @@ public class OSSPublisher extends Publisher implements SimpleBuildStep {
                 uploadFile(client, logger, expandRemote, p);
                 logger.println("upload file success");
             }
+
         }
-        
+
     }
 
     private void upload(OSSClient client, PrintStream logger, String base, FilePath path, boolean root)
