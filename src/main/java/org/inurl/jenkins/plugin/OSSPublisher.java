@@ -3,10 +3,16 @@ package org.inurl.jenkins.plugin;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import javax.annotation.Nonnull;
 
 import com.aliyun.oss.OSSClient;
+import com.aliyun.oss.model.DeleteObjectsRequest;
+import com.aliyun.oss.model.ListObjectsRequest;
+import com.aliyun.oss.model.OSSObjectSummary;
+import com.aliyun.oss.model.ObjectListing;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
@@ -112,10 +118,16 @@ public class OSSPublisher extends Publisher implements SimpleBuildStep {
         for(int i=0; i<localPaths.length; i++) {
             String local = localPaths[i].substring(1);
             String remote = remotePaths[i].substring(1);
+
             String expandLocal = envVars.expand(local);
             String expandRemote = envVars.expand(remote);
             logger.println("expandLocalPath["+i+"] =>" + expandLocal);
             logger.println("expandRemotePath["+i+"] =>" + expandRemote);
+
+            // 删除远端目录下的所有文件
+            deleteDir(client, expandRemote + "/");
+            logger.println("delete remotePath["+i+"] =>" + expandRemote);
+
             FilePath p = new FilePath(workspace, expandLocal);
             if (p.isDirectory()) {
                 logger.println("upload dir => " + p);
@@ -131,6 +143,30 @@ public class OSSPublisher extends Publisher implements SimpleBuildStep {
 
     }
 
+    private void deleteDir(OSSClient ossClient, String prefix) {
+        // 删除目录及目录下的所有文件。
+        String nextMarker = null;
+        ObjectListing objectListing = null;
+        do {
+            ListObjectsRequest listObjectsRequest = new ListObjectsRequest(bucketName)
+                    .withPrefix(prefix)
+                    .withMarker(nextMarker);
+
+            objectListing = ossClient.listObjects(listObjectsRequest);
+            if (objectListing.getObjectSummaries().size() > 0) {
+                List<String> keys = new ArrayList<String>();
+                for (OSSObjectSummary s : objectListing.getObjectSummaries()) {
+                    keys.add(s.getKey());
+                }
+                DeleteObjectsRequest deleteObjectsRequest = new DeleteObjectsRequest(bucketName).withKeys(keys);
+                ossClient.deleteObjects(deleteObjectsRequest);
+            }
+
+            nextMarker = objectListing.getNextMarker();
+        } while (objectListing.isTruncated());
+
+    }
+
     private void upload(OSSClient client, PrintStream logger, String base, FilePath path, boolean root)
             throws InterruptedException, IOException {
         if (path.isDirectory()) {
@@ -142,7 +178,8 @@ public class OSSPublisher extends Publisher implements SimpleBuildStep {
         uploadFile(client, logger, base + "/" + path.getName(), path);
     }
 
-    private void uploadFile(OSSClient client, PrintStream logger, String key, FilePath path)
+    private void
+    uploadFile(OSSClient client, PrintStream logger, String key, FilePath path)
             throws InterruptedException, IOException {
         if (!path.exists()) {
             logger.println("file [" + path.getRemote() + "] not exists, skipped");
